@@ -2,102 +2,176 @@
 
 **Prepared:** 16 November 2026 (Europe/Skopje)
 
-Scope: latest desktop Chrome, football, single pre-match bets and the supporting API. Six scenarios are ordered by financial risk. Reset and read back the sandbox balance before each independent scenario; record the actual baseline rather than assuming the advertised EUR 125.50. Use the application's sample catalogue and status labels; this assignment does not use a real sports schedule.
+## Objective and scope
 
-## SB-01 - Place one bet and reconcile receipt and balance
+Verify that a customer can place one pre-match football bet and that the
+selected outcome, stake, odds, payout and wallet reconcile. Check that the
+slip and API enforce stake limits and that the customer can find and manage
+the intended selection.
+
+Coverage includes the desktop match list and filters, one active selection,
+stake validation, placement, the receipt and the wallet. The feature
+specification excludes live bets, accumulators, other sports and mobile UX.
+
+## Test approach
+
+- **Scenario execution.** Run SB-01, SB-02 and SB-03 in desktop Chrome. Cover a
+  successful transaction first, then insufficient funds, then stake limits.
+  SB-03 goes before SB-04 because every placement uses stake validation and
+  the boundaries can be checked without submitting additional wagers.
+- **Additional coverage.** SB-04 checks repeat submission. SB-05 and SB-06
+  check selection and filtering before a wager. Run a short exploratory check
+  around placement and wallet behavior after the three prioritized scenarios,
+  including error feedback, retry and receipt dismissal.
+- **Automation.** The Selenium test covers SB-01 across the catalogue, slip,
+  receipt and persisted/visible wallet. The API test covers SB-03 by rejecting
+  €100.01 without a debit, then accepting €100.00 and checking the success
+  response and persisted balance.
+
+## Environment and test data
+
+Use the [assignment sandbox](https://qae-assignment-tau.vercel.app/) in
+desktop Chrome and the assigned test account. Use
+[Swagger](https://qae-assignment-tau.vercel.app/api/docs) or the direct API
+for wallet readbacks. Start when at least one upcoming fixture and the
+balance endpoint are available.
+
+Run balance-changing scenarios sequentially. Where a reset is needed, verify
+the persisted opening balance with `GET /api/balance` before using it as test
+data. Use an upcoming match with a known price and a payout that is exact to
+the cent. Use Home odds other than 2.00 so the known receipt payout defect
+cannot match the preview by coincidence. Automation uses a future-dated
+fixture; same-day eligibility requires clarification. For the stake-cap
+check, start with at least €100.01 available so insufficient balance cannot
+mask the per-bet maximum.
+
+The working minimum is €1.00, based on the business rules and UI copy.
+Feature Specification §4.1 lists €1.01. Record the exact €1.00 behavior and
+carry the discrepancy forward as a clarification.
+
+## Prioritized scenarios
+
+### SB-01 — Place one bet and reconcile receipt and balance
 
 **Priority** Critical
 
-**Risk rationale** An incorrect debit or misleading receipt can cause a financial dispute even when the success modal appears.
+**Risk rationale** An incorrect debit or receipt can lead to a wager dispute.
 
 **Steps**
 
-1. Read `GET /api/balance`. Verify both UI balances agree. Select an upcoming Home outcome with odds other than 2.00. Record the catalogue ID, home/away order and odds.
-2. Enter EUR 10.00, verify the slip and payout preview, and submit once. Observe the loading state and final outcome.
-3. Compare every receipt field with the slip. Read the persisted balance, close the receipt, and check both wallet displays and selection count.
+1. Verify the opening wallet and select an upcoming Home outcome.
+2. Enter €10.00, record the slip details and submit once.
+3. Record the outcome. Compare the receipt with the slip, then close it and
+   reconcile both onscreen balances with the API balance before refreshing.
 
-**Expected result** One successful placement and one EUR 10.00 debit. Receipt match order, selection, stake, odds and payout agree with the catalogue/slip. Payout equals stake times odds. The receipt includes a meaningful bet ID and placement timestamp. Closing it clears the selection; both displays agree with the persisted balance. References: sections 2.2-2.4 and 3.
+**Expected result** One success receipt and one €10.00 debit. The receipt
+contains a bet ID and placement timestamp. The match order, outcome, stake,
+odds and payout agree with the slip. Payout equals stake × odds. Closing
+the receipt clears the selection and the displayed wallets match the API.
 
-## SB-02 - Reject a stake one cent above available funds
+### SB-02 — Reject a stake one cent above available funds
 
 **Priority** Critical
 
-**Risk rationale** Accepting an unfunded wager can overdraw the wallet.
+**Risk rationale** Accepting an unfunded wager can leave the wallet overdrawn.
 
 **Steps**
 
-1. Reset, read the persisted balance, and confirm it covers EUR 100.00. Place one EUR 100.00 bet to seed a balance below the per-bet cap; record its outcome.
-2. Read the resulting persisted balance and reload the UI. Use one cent above that amount as the next stake, provided it is between EUR 1.01 and EUR 100.00. Otherwise record a setup blocker.
-3. Select an upcoming match, enter the stake and inspect validation and the placement button. Read the balance again without submitting an invalid UI bet.
+1. Establish and verify a wallet balance where the next cent is a valid stake
+   under the per-bet limits. A €100.00 setup bet from €120.00 leaves €20.00.
+2. Reload the app, select an upcoming outcome and enter one cent more than
+   the verified wallet. For a €20.00 wallet, enter €20.01.
+3. Inspect the validation and submit state, then verify the persisted wallet.
 
-**Expected result** The UI shows `Insufficient balance`, prevents placement and leaves persisted funds unchanged from step 2. No second receipt appears. Reference: section 4.1.
+**Expected result** **Insufficient balance** is displayed, **Place Bet** is
+disabled and the persisted wallet stays at the pre-attempt amount.
 
-## SB-03 - Validate stake boundaries and decimal precision
+### SB-03 — Validate stake limits and decimal precision
 
 **Priority** High
 
-**Risk rationale** A one-cent boundary error can block valid wagers or accept excess exposure. Invalid precision can change the intended amount.
+**Risk rationale** A boundary error can block a valid wager, exceed the
+per-bet limit or change the customer's intended stake.
 
 **Steps**
 
-1. Reset and verify at least EUR 100.01 of persisted funds, then select an upcoming outcome.
-2. Try 0.99, 1.00, 1.01, 100.00 and 100.01 individually. Record validation, displayed input and whether placement is enabled. Clear the input between attempts; these UI checks do not require submitting every value.
-3. Paste `10.001`, then try blank, zero, a negative amount and nonnumeric text. Record whether the input prevents invalid text or shows validation. Confirm invalid amounts cannot be submitted.
-4. Independently check the API maximum: reject 100.01 without a debit, then accept 100.00 and verify the response and persisted debit. The automated API scenario covers this pair.
+1. Verify the wallet has at least €100.01 and select an upcoming outcome.
+2. Enter €0.99, €1.00, €1.01, €100.00 and €100.01 separately. Record the
+   displayed value, validation message and submit state.
+3. Paste `10.001`, then try `-10`, `1e2` and `1.2.3` separately. Record any
+   conversion, validation and submit state. Stop at the slip for invalid inputs.
+4. At the API, reject a €100.01 stake without a debit, then accept €100.00
+   and verify response fields and the persisted debit.
 
-**Expected result** Reject below-minimum values, amounts over EUR 100.00, missing/nonnumeric stakes and more than two decimal places at the API. The UI prevents an invalid stake from reaching placement. Accept 1.01 and 100.00 with sufficient funds. Record 1.00 separately under the unresolved minimum conflict below. References: sections 3, 4.1 and 4.4.
+**Expected result** €0.99 and €100.01 are blocked with the relevant limit
+message. €1.00, €1.01 and €100.00 are enabled under the working minimum
+with sufficient funds. Negative or malformed text must not silently become a
+different valid stake. Record precision truncation separately: limiting a
+third decimal may be a valid input restriction, and the intended normalization
+behavior requires clarification.
 
-## SB-04 - Prevent overlapping placement requests
+### SB-04 — Prevent a duplicate placement during submission
 
 **Priority** High
 
-**Risk rationale** Overlapping submissions can create unintended wagers and extra debits.
+**Risk rationale** Repeated input while placement is in progress can result
+in an extra wager and debit.
 
 **Steps**
 
-1. Record persisted funds, select an upcoming outcome and enter EUR 10.00. Open Chrome DevTools Network and preserve the request log.
-2. Double-click Place Bet and try clicking during `Placing...`. Record actual request start/end timing, request payloads and responses.
-3. Close the receipt and read the persisted balance. If no requests overlap, record only the UI prevention result; mark API concurrency unverified.
+1. Verify the opening balance and prepare one €10.00 wager.
+2. Double-click **Place Bet** and try another activation during **Placing…**.
+3. Capture request start/end timings in Chrome DevTools Network. Compare
+   requests, receipts and the persisted wallet.
 
-**Expected result** The UI prevents repeated submission while processing, resolves to one outcome and deducts EUR 10.00 once. If a second request arrives while the same user's first bet is being processed, the documented API response is HTTP 409. Separate submissions after completion are separate bets, not a promised idempotency mechanism. References: sections 2.3 and 5.3.
+**Expected result** One accepted wager, one success receipt and one €10.00
+debit. The loading state protects the placement from repeat input. An API
+request arriving while another bet is in progress should return HTTP 409.
+A double-click alone does not establish request overlap, and separate completed
+submissions are not covered by an idempotency guarantee.
 
-## SB-05 - Recover from a failed placement
-
-**Priority** High
-
-**Risk rationale** A misleading retry or dismissal can place an unintended bet, lose the user's input or leave the flow unusable.
-
-**Steps**
-
-1. Record persisted funds, select an upcoming outcome and enter EUR 10.00. In Chrome DevTools, block only the browser request to `/api/place-bet`, then submit once. Record that this simulates a transport failure, not an observed server HTTP 500.
-2. Verify the error modal, its title/body and all three actions. Read persisted funds through the unblocked balance endpoint; the blocked placement must not have debited them.
-3. Remove the blocking rule, click Rebet once and observe a fresh submission using the same selection/stake. Check the final receipt and one persisted debit.
-4. In separate failed attempts, test Close and the top-right X. For each, record a fresh baseline, block placement, wait for the error, dismiss it and inspect selection, stake, request count and funds. Remove the blocking rule afterward.
-
-**Expected result** The modal says `Something went wrong` and explains the failure. Rebet closes it and retries the retained bet, eventually yielding one final outcome. Close and X clear the selection/stake, do not retry and preserve funds. References: sections 2.3 and 2.5.
-
-## SB-06 - Replace and remove a selection
+### SB-05 — Replace and remove a selection
 
 **Priority** Medium
 
-**Risk rationale** A stale selection can make the user wager on a different outcome than intended.
+**Risk rationale** A mismatched slip can lead the customer to confirm the
+wrong outcome.
 
 **Steps**
 
-1. Select Home, then select Draw on a different upcoming match.
-2. Compare count, teams, outcome and odds with the second selection. Remove it using its x control.
-3. Make another selection, choose Remove All and inspect the slip and placement availability.
+1. Select Home for one upcoming match, then Draw for another.
+2. Check the active match, outcome, odds and slip count. Remove the selection
+   with its `x` control.
+3. Select another outcome and clear it with **Remove All**.
 
-**Expected result** Replacement leaves one active selection with the second match and Draw odds. Either removal leaves an empty slip and placement unavailable. References: sections 2.1-2.2.
+**Expected result** The slip holds one selection and matches the last
+chosen outcome. Either removal path empties the slip and disables placement.
 
-## Exploratory charters
+### SB-06 — Verify date and odds filters
 
-Time permitting, check inclusive date/odds endpoints, inverted filter feedback, direct-API authentication/selection/match/body validation, and whether refresh shows the debited balance after a stale display. Record only checks actually performed. These are exploration candidates rather than extra mandatory scenarios.
+**Priority** Medium
 
-## Clarifications
+**Risk rationale** Incorrect boundaries can hide eligible offers or leave
+the customer with unclear feedback.
 
-| Topic | Conflicting or incomplete requirement | Treatment |
-| --- | --- | --- |
-| Minimum stake | Section 3 and section 4.4 say EUR 1.00; section 4.1 says EUR 1.01. OpenAPI specifies minimum 1.00. | Record EUR 1.00 behavior without declaring the conflict resolved; request product clarification. |
-| Same-day eligibility | API exposes a date only; the UI distinguishes TODAY from UPCOMING. | Do not infer a kickoff time or compare against real sports schedules. Automated placement requires a future-dated UPCOMING offer; explore TODAY separately until its eligibility is clarified. |
-| Reset balance | Specification requires response/persisted consistency; observed reset response differs. | Record BUG-04 and establish baselines through GET, never the reset response alone. |
+**Steps**
+
+1. Choose a date with a known fixture, then apply a range with known fixtures
+   on both endpoints. Compare the visible fixtures with the catalog dates.
+2. Clear the date filter. Use a displayed price as both odds endpoints.
+3. Enter a minimum above the maximum and apply the odds filter.
+
+**Expected result** The single-day result matches that day and the date
+range includes both endpoints. A match at the exact odds price is visible.
+The inverted odds range is rejected with clear feedback.
+
+## Evidence and completion
+
+Record the environment, inputs, actual behavior and Pass, Fail or Blocked
+for SB-01 through SB-03. For a debit, compare the slip and receipt with an
+independent balance read. Add a screenshot or exact values for any mismatch.
+Log the exploratory check and link the corresponding bugs. The run is ready
+for review when these outcomes and the two automated tests are available.
+
+[Execution results](execution-results.md) · [Bug reports](bug-tickets.md) ·
+[Automation strategy](strategy.md)
